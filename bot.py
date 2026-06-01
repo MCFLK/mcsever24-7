@@ -25,7 +25,7 @@ class ControlPanelHandler(BaseHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         
         # Check if the user is sending a message via URL parameter (e.g., /send?msg=hello)
-        if parsed_url.path == '/send':
+        if parsed_url.path == './send':
             query_params = urllib.parse.parse_qs(parsed_url.query)
             if 'msg' in query_params and bot_instance:
                 message_to_send = query_params['msg'][0]
