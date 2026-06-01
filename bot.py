@@ -8,8 +8,8 @@ from javascript import require, On, Once
 mineflayer = require('mineflayer')
 
 # --- Configuration ---
-MINECRAFT_IP = os.getenv("MINECRAFT_IP", "your.server.ip")
-MINECRAFT_PORT = int(os.getenv("MINECRAFT_PORT", "25565"))
+MINECRAFT_IP = os.getenv("MINECRAFT_IP", "eleytra.aternos.me")
+MINECRAFT_PORT = int(os.getenv("MINECRAFT_PORT", "28657"))
 BOT_NAME = os.getenv("BOT_NAME", "AFK_Bot_Py")
 KOYEB_PORT = int(os.getenv("PORT", "8080"))
 
