@@ -37,11 +37,13 @@ def launch_minecraft_bot():
     print(f"[BOT] Attempting connection to {MINECRAFT_IP}:{MINECRAFT_PORT}...")
     
     try:
+        # Added 'version': '1.21.1' to force protocol matching
         bot = mineflayer.createBot({
             'host': MINECRAFT_IP,
             'port': MINECRAFT_PORT,
             'username': BOT_NAME,
-            'hideErrors': True  # Prevents node.js from throwing unhandled stack traces into Koyeb logs
+            'version': '1.21.1',  # <-- FORCES BOT TO MATCH YOUR 1.21.1 SERVER
+            'hideErrors': True    # Prevents node.js from throwing unhandled stack traces into Koyeb logs
         })
     except Exception as e:
         print(f"[CRITICAL] Client initialization failed: {e}")
@@ -76,7 +78,6 @@ def handle_reconnect():
     time.sleep(reconnect_delay)
     
     # Exponential backoff: Increase wait time slightly if it keeps failing, topping out at 2 minutes.
-    # This keeps your script from getting rate-limited or banned by firewalls/anti-DDoS plugins.
     reconnect_delay = min(reconnect_delay * 1.5, 120)
     
     launch_minecraft_bot()
