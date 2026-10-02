@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Bot Control</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        header {
+            background: #16213e;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #0f3460;
+        }
+        header h1 { font-size: 18px; }
+        #status {
+            font-size: 14px;
+            padding: 4px 12px;
+            border-radius: 12px;
+            background: #e94560;
+        }
+        #status.connected { background: #2ecc71; }
+        #chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .msg {
+            max-width: 80%;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .msg .sender {
+            font-weight: bold;
+            font-size: 12px;
+            opacity: 0.8;
+            display: block;
+            margin-bottom: 2px;
+        }
+        .msg.other {
+            background: #0f3460;
+            align-self: flex-start;
+        }
+        .msg.mine {
+            background: #2ecc71;
+            color: #000;
+            align-self: flex-end;
+        }
+        .msg.system {
+            background: #533483;
+            align-self: center;
+            font-size: 12px;
+            text-align: center;
+        }
+        footer {
+            display: flex;
+            padding: 15px;
+            background: #16213e;
+            border-top: 2px solid #0f3460;
+            gap: 10px;
+        }
+        #input {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: #1a1a2e;
+            color: #eee;
+            font-size: 14px;
+            outline: none;
+        }
+        #input::placeholder { color: #666; }
+        #send {
+            padding: 12px 24px;
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #send:hover { background: #c73650; }
+        .hint {
+            font-size: 11px;
+            opacity: 0.5;
+            padding: 0 15px 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🎮 Minecraft Bot Control</h1>
+        <span id="status">Connecting...</span>
+    </header>
+    <div id="chat"></div>
+    <div class="hint">Type a message or use /command for Minecraft commands</div>
+    <footer>
+        <input id="input" type="text" placeholder="Type a message or /command..." autocomplete="off" autofocus>
+        <button id="send">Send</button>
+    </footer>
+
+    <script>
+        const socket = io();
+        const chatEl = document.getElementById("chat");
+        const inputEl = document.getElementById("input");
+        const sendBtn = document.getElementById("send");
+        const statusEl = document.getElementById("status");
+
+        function addMessage(sender, message, cls) {
+            const div = document.createElement("div");
+            div.className = "msg " + cls;
+            if (sender) {
+                const s = document.createElement("span");
+                s.className = "sender";
+                s.textContent = sender;
+                div.appendChild(s);
+            }
+            div.appendChild(document.createTextNode(message));
+            chatEl.appendChild(div);
+            chatEl.scrollTop = chatEl.scrollHeight;
+        }
+
+        socket.on("connect", () => {
+            statusEl.textContent = "Connected to WebUI";
+            statusEl.className = "connected";
+        });
+
+        socket.on("disconnect", () => {
+            statusEl.textContent = "Disconnected";
+            statusEl.className = "";
+        });
+
+        socket.on("bot_status", (data) => {
+            const s = data.status;
+            statusEl.textContent = "Bot: " + s;
+            if (s === "connected") {
+                statusEl.className = "connected";
+            } else {
+                statusEl.className = "";
+            }
+        });
+
+        socket.on("chat_history", (messages) => {
+            chatEl.innerHTML = "";
+            messages.forEach(m => {
+                const cls = m.sender === "WebUI" ? "mine" : "other";
+                addMessage(m.sender, m.message, cls);
+            });
+        });
+
+        socket.on("new_message", (data) => {
+            const cls = data.sender === "WebUI" ? "mine" : "other";
+            addMessage(data.sender, data.message, cls);
+        });
+
+        function sendMessage() {
+            const text = inputEl.value.trim();
+            if (!text) return;
+            socket.emit("send_message", { text: text });
+            inputEl.value = "";
+        }
+
+        sendBtn.addEventListener("click", sendMessage);
+        inputEl.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") sendMessage();
+        });
+    </script>
+</body>
+</html>
