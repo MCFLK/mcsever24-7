@@ -4,7 +4,7 @@ import random
 import threading
 import sqlite3
 import queue
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Flask
 from flask_socketio import SocketIO, emit
@@ -89,7 +89,10 @@ HTML_PAGE = """
             chatEl.innerHTML = "";
             messages.forEach(m => addMessage(m.sender, m.message, m.sender === "WebUI" ? "mine" : "other"));
         });
-        socket.on("new_message", (data) => addMessage(data.sender, data.message, data.sender === "WebUI" ? "mine" : "other"));
+        socket.on("new_message", (data) => {
+            const cls = data.sender === "WebUI" ? "mine" : (data.is_system ? "system" : "other");
+            addMessage(data.sender, data.message, cls);
+        });
 
         function sendMessage() {
             const text = inputEl.value.trim();
@@ -126,7 +129,7 @@ def save_message(sender, message):
     c = conn.cursor()
     c.execute(
         "INSERT INTO messages (timestamp, sender, message) VALUES (?, ?, ?)",
-        (datetime.utcnow().isoformat(), sender, message)
+        (datetime.now(timezone.utc).isoformat(), sender, message)
     )
     conn.commit()
     conn.close()
@@ -164,7 +167,7 @@ def handle_send_message(data):
     web_to_bot_queue.put({"text": text})
     save_message("WebUI", text)
     socketio.emit("new_message", {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "sender": "WebUI",
         "message": text
     })
@@ -198,47 +201,66 @@ async def bot_main():
                         print(f"[CHAT] {sender}: {message}")
                         save_message(sender, message)
                         socketio.emit("new_message", {
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                             "sender": sender,
                             "message": message
                         })
 
-                # This blocks until the bot disconnects or crashes
+                # NEW: Log exactly why the bot is disconnecting
+                @bot.on(EventTypes.BOT_DISCONNECTED)
+                async def on_disconnect(event):
+                    reason = event.data if hasattr(event, 'data') else "Unknown"
+                    print(f"❌ Disconnected from server. Reason: {reason}")
+                    socketio.emit("bot_status", {"status": f"disconnected: {reason}"})
+
                 await bot.run()
 
         except Exception as e:
             print(f"⚠️ Bot connection error: {e}")
             socketio.emit("bot_status", {"status": f"error: {e}"})
         
-        # If we reach here, the bot disconnected or crashed. Wait and retry.
         print("🔄 Bot disconnected. Retrying in 10 seconds...")
         socketio.emit("bot_status", {"status": "reconnecting"})
         await asyncio.sleep(10)
 
 async def wander_loop(bot):
-    """Makes the bot move and look around randomly, and sends periodic chat messages."""
+    """Makes the bot move and look around randomly. No chat to avoid spam kicks."""
     await asyncio.sleep(5)
     while True:
         try:
-            pos = bot.get_position()
+            pos = None
+            if hasattr(bot, 'get_position'):
+                pos = bot.get_position()
+            elif hasattr(bot, 'position'):
+                pos = bot.position
+            
             if pos is None:
                 await asyncio.sleep(2)
                 continue
-            x, y, z = pos
+            
+            x, y, z = 0, 0, 0
+            if hasattr(pos, 'x'):
+                x, y, z = pos.x, pos.y, pos.z
+            elif isinstance(pos, (tuple, list)) and len(pos) >= 3:
+                x, y, z = pos[0], pos[1], pos[2]
+            else:
+                await asyncio.sleep(2)
+                continue
 
-            target_x = x + random.uniform(-5, 5)
-            target_z = z + random.uniform(-5, 5)
+            # Move to a random nearby position
+            target_x = x + random.uniform(-3, 3)
+            target_z = z + random.uniform(-3, 3)
             print(f"🚶 Moving to ({target_x:.1f}, {y}, {target_z:.1f})")
-            await bot.move_to(target_x, y, target_z)
+            
+            try:
+                if hasattr(bot, 'move_to'):
+                    await bot.move_to(target_x, y, target_z)
+                elif hasattr(bot, 'walk_to'):
+                    await bot.walk_to(target_x, y, target_z)
+            except Exception as move_error:
+                print(f"Move error: {move_error}")
 
-            # Send a random chat message to avoid AFK kick
-            if random.random() < 0.3:
-                messages = ["Hello!", "AFK", "brb", "hi", "lol", "Just chillin'"]
-                msg = random.choice(messages)
-                await bot.chat(msg)
-                print(f"[CHAT] Sent: {msg}")
-
-            await asyncio.sleep(random.uniform(3, 8))
+            await asyncio.sleep(random.uniform(4, 8))
         except Exception as e:
             print(f"⚠️ Wander loop error: {e}")
             await asyncio.sleep(5)
@@ -247,12 +269,21 @@ async def send_to_minecraft(text):
     global bot_instance
     if bot_instance is None:
         print("[BOT] Not connected yet, cannot send message.")
+        socketio.emit("new_message", {"sender": "System", "message": "Bot is not connected. Message not sent.", "is_system": True})
         return
     try:
-        await bot_instance.chat(text)
+        # Try different chat methods in case mindpy API changed
+        if hasattr(bot_instance, 'chat'):
+            await bot_instance.chat(text)
+        elif hasattr(bot_instance, 'send_chat'):
+            await bot_instance.send_chat(text)
+        else:
+            raise AttributeError("No chat method found on bot instance")
+        
         print(f"[SENT] {text}")
     except Exception as e:
         print(f"[BOT] Failed to send: {e}")
+        socketio.emit("new_message", {"sender": "System", "message": f"Failed to send: {e}", "is_system": True})
 
 def run_bot_thread():
     global bot_loop
