@@ -13,8 +13,8 @@ from javascript import require, On, Once
 mineflayer = require('mineflayer')
 
 # --- Configuration ---
-MINECRAFT_IP = os.getenv("MINECRAFT_IP", "eleytra.aternos.me")
-MINECRAFT_PORT = int(os.getenv("MINECRAFT_PORT", "28657"))
+MINECRAFT_IP = os.getenv("MINECRAFT_IP", "nd-de2.hn21.xyz")
+MINECRAFT_PORT = int(os.getenv("MINECRAFT_PORT", "20029"))
 BOT_NAME = os.getenv("BOT_NAME", "Homie")
 KOYEB_PORT = int(os.getenv("PORT", "8080"))
 PANEL_KEY = os.getenv("PANEL_KEY", "")  # Optional: set to protect the panel
