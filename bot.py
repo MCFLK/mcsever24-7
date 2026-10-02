@@ -9,12 +9,12 @@ from datetime import datetime
 from flask import Flask
 from flask_socketio import SocketIO, emit
 
-from mindpy import Bot, EventTypes, Event
+from mindpy import Bot, EventTypes
 
 # ---------- Configuration ----------
 SERVER_HOST = os.getenv("MC_HOST", "nd-de2.hn21.xyz")
 SERVER_PORT = int(os.getenv("MC_PORT", 20029))
-BOT_USERNAME = os.getenv("MC_USERNAME", "WanderBotRedHat")
+BOT_USERNAME = os.getenv("MC_USERNAME", "WanderBot")
 WEB_PORT = int(os.getenv("PORT", 8080))
 
 # ---------- Embedded HTML Web Interface ----------
@@ -80,7 +80,7 @@ HTML_PAGE = """
         }
 
         socket.on("connect", () => { statusEl.textContent = "Connected to WebUI"; statusEl.className = "connected"; });
-        socket.on("disconnect", () => { statusEl.textContent = "Disconnected"; statusEl.className = ""; });
+        socket.on("disconnect", () => { statusEl.textContent = "WebUI Disconnected"; statusEl.className = ""; });
         socket.on("bot_status", (data) => {
             statusEl.textContent = "Bot: " + data.status;
             statusEl.className = data.status === "connected" ? "connected" : "";
@@ -169,77 +169,76 @@ def handle_send_message(data):
         "message": text
     })
 
-# ---------- Bot Logic (runs in its own asyncio thread) ----------
+# ---------- Bot Logic ----------
 bot_instance = None
 bot_loop = None
 
 async def bot_main():
+    """Main loop that handles connecting and reconnecting forever."""
     global bot_instance
-    print(f"🚀 Starting bot as '{BOT_USERNAME}' on {SERVER_HOST}:{SERVER_PORT}...")
+    
+    while True:
+        print(f"🚀 Starting bot as '{BOT_USERNAME}' on {SERVER_HOST}:{SERVER_PORT}...")
+        try:
+            async with Bot(SERVER_HOST, port=SERVER_PORT, username=BOT_USERNAME) as bot:
+                bot_instance = bot
 
-    try:
-        async with Bot(SERVER_HOST, port=SERVER_PORT, username=BOT_USERNAME) as bot:
-            bot_instance = bot
+                @bot.on(EventTypes.BOT_SPAWNED)
+                async def on_spawn(event):
+                    print("✅ Bot spawned! Starting wander loop...")
+                    socketio.emit("bot_status", {"status": "connected"})
+                    asyncio.create_task(wander_loop(bot))
 
-            @bot.on(EventTypes.BOT_SPAWNED)
-            async def on_spawn(event):
-                print("✅ Bot spawned! Starting wander loop...")
-                socketio.emit("bot_status", {"status": "connected"})
-                asyncio.create_task(wander_loop(bot))
+                @bot.on(EventTypes.CHAT_MESSAGE)
+                async def on_chat(event):
+                    data = event.data
+                    sender = data.get("sender", "Unknown")
+                    message = data.get("raw", "")
+                    if message and sender != BOT_USERNAME:
+                        print(f"[CHAT] {sender}: {message}")
+                        save_message(sender, message)
+                        socketio.emit("new_message", {
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "sender": sender,
+                            "message": message
+                        })
 
-            @bot.on(EventTypes.CHAT_MESSAGE)
-            async def on_chat(event):
-                data = event.data
-                sender = data.get("sender", "Unknown")
-                message = data.get("raw", "")
-                if message and sender != BOT_USERNAME:
-                    print(f"[CHAT] {sender}: {message}")
-                    save_message(sender, message)
-                    socketio.emit("new_message", {
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "sender": sender,
-                        "message": message
-                    })
+                # This blocks until the bot disconnects or crashes
+                await bot.run()
 
-            @bot.on(EventTypes.DISCONNECTED)
-            async def on_disconnect(event):
-                print(f"❌ Disconnected from server")
-                socketio.emit("bot_status", {"status": "disconnected"})
-
-            await bot.run()
-    except Exception as e:
-        print(f"⚠️ Bot error: {e}")
-        socketio.emit("bot_status", {"status": f"error: {e}"})
+        except Exception as e:
+            print(f"⚠️ Bot connection error: {e}")
+            socketio.emit("bot_status", {"status": f"error: {e}"})
+        
+        # If we reach here, the bot disconnected or crashed. Wait and retry.
+        print("🔄 Bot disconnected. Retrying in 10 seconds...")
+        socketio.emit("bot_status", {"status": "reconnecting"})
+        await asyncio.sleep(10)
 
 async def wander_loop(bot):
-    """Makes the bot move, look, and interact randomly."""
+    """Makes the bot move and look around randomly, and sends periodic chat messages."""
     await asyncio.sleep(5)
     while True:
         try:
-            # MindPy movement API
-            x = random.uniform(-5, 5)
-            z = random.uniform(-5, 5)
-            yaw = random.uniform(0, 360)
-            pitch = random.uniform(-45, 45)
+            pos = bot.get_position()
+            if pos is None:
+                await asyncio.sleep(2)
+                continue
+            x, y, z = pos
 
-            print(f"🚶 Moving randomly (yaw={yaw:.1f}, pitch={pitch:.1f})")
-            await bot.move(x=x, z=z, yaw=yaw, pitch=pitch)
-            await asyncio.sleep(1)
+            target_x = x + random.uniform(-5, 5)
+            target_z = z + random.uniform(-5, 5)
+            print(f"🚶 Moving to ({target_x:.1f}, {y}, {target_z:.1f})")
+            await bot.move_to(target_x, y, target_z)
 
-            # Swing arm to simulate touching blocks
-            if random.random() < 0.5:
-                print("👋 Swinging arm")
-                await bot.swing_arm()
-            else:
-                print("🖱️ Using held item")
-                await bot.use_item()
-
-            # Occasionally look around
+            # Send a random chat message to avoid AFK kick
             if random.random() < 0.3:
-                await bot.look(yaw=random.uniform(0, 360), pitch=random.uniform(-90, 90))
-                print("👀 Looking around")
+                messages = ["Hello!", "AFK", "brb", "hi", "lol", "Just chillin'"]
+                msg = random.choice(messages)
+                await bot.chat(msg)
+                print(f"[CHAT] Sent: {msg}")
 
-            await asyncio.sleep(random.uniform(2, 6))
+            await asyncio.sleep(random.uniform(3, 8))
         except Exception as e:
             print(f"⚠️ Wander loop error: {e}")
             await asyncio.sleep(5)
