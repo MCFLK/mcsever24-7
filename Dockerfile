@@ -1,24 +1,17 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
+FROM node:20-slim
 
-# Install Node.js (required for the underlying Minecraft client protocol)
-RUN apt-get update && apt-get install -y curl \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory
 WORKDIR /app
 
-# Copy and install Python requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --break-system-packages -r requirements.txt
 
-# Copy the bot script
-COPY bot.py .
+RUN npm install mineflayer
 
-# Expose the web check port for Koyeb
+COPY . .
+
+ENV PORT=8080
 EXPOSE 8080
 
-# Run the script with unbuffered output so logs show up instantly
-CMD ["python", "-u", "bot.py"]
+CMD ["python3", "bot.py"]
