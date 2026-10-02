@@ -9,14 +9,13 @@ from datetime import datetime
 from flask import Flask
 from flask_socketio import SocketIO, emit
 
-from mcpycore import MinecraftClient
-from mcpycore.client.reconnect import ExponentialBackoff
+from mindpy import Bot, EventTypes, Event
 
 # ---------- Configuration ----------
 SERVER_HOST = os.getenv("MC_HOST", "nd-de2.hn21.xyz")
 SERVER_PORT = int(os.getenv("MC_PORT", 20029))
-BOT_USERNAME = os.getenv("MC_USERNAME", "WanderBot")
-WEB_PORT = int(os.getenv("PORT", 8080))  # Koyeb sets PORT automatically
+BOT_USERNAME = os.getenv("MC_USERNAME", "WanderBotRedHat")
+WEB_PORT = int(os.getenv("PORT", 8080))
 
 # ---------- Embedded HTML Web Interface ----------
 HTML_PAGE = """
@@ -105,7 +104,7 @@ HTML_PAGE = """
 </html>
 """
 
-# ---------- Database Setup (SQLite) ----------
+# ---------- Database Setup ----------
 DB_PATH = "chat_history.db"
 
 def init_db():
@@ -149,7 +148,6 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 def index():
     return HTML_PAGE
 
-# Thread-safe queue for messages from the web UI to the bot
 web_to_bot_queue = queue.Queue()
 
 @socketio.on("connect")
@@ -172,103 +170,97 @@ def handle_send_message(data):
     })
 
 # ---------- Bot Logic (runs in its own asyncio thread) ----------
-bot_client = None
+bot_instance = None
 bot_loop = None
 
-async def wander_loop(client):
+async def bot_main():
+    global bot_instance
+    print(f"🚀 Starting bot as '{BOT_USERNAME}' on {SERVER_HOST}:{SERVER_PORT}...")
+
+    try:
+        async with Bot(SERVER_HOST, port=SERVER_PORT, username=BOT_USERNAME) as bot:
+            bot_instance = bot
+
+            @bot.on(EventTypes.BOT_SPAWNED)
+            async def on_spawn(event):
+                print("✅ Bot spawned! Starting wander loop...")
+                socketio.emit("bot_status", {"status": "connected"})
+                asyncio.create_task(wander_loop(bot))
+
+            @bot.on(EventTypes.CHAT_MESSAGE)
+            async def on_chat(event):
+                data = event.data
+                sender = data.get("sender", "Unknown")
+                message = data.get("raw", "")
+                if message and sender != BOT_USERNAME:
+                    print(f"[CHAT] {sender}: {message}")
+                    save_message(sender, message)
+                    socketio.emit("new_message", {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "sender": sender,
+                        "message": message
+                    })
+
+            @bot.on(EventTypes.DISCONNECTED)
+            async def on_disconnect(event):
+                print(f"❌ Disconnected from server")
+                socketio.emit("bot_status", {"status": "disconnected"})
+
+            await bot.run()
+    except Exception as e:
+        print(f"⚠️ Bot error: {e}")
+        socketio.emit("bot_status", {"status": f"error: {e}"})
+
+async def wander_loop(bot):
+    """Makes the bot move, look, and interact randomly."""
     await asyncio.sleep(5)
     while True:
         try:
-            dx = random.uniform(-5.0, 5.0)
-            dz = random.uniform(-5.0, 5.0)
-            current_pos = client.position
-            target_x = current_pos.x + dx
-            target_z = current_pos.z + dz
-            target_y = current_pos.y
+            # MindPy movement API
+            x = random.uniform(-5, 5)
+            z = random.uniform(-5, 5)
+            yaw = random.uniform(0, 360)
+            pitch = random.uniform(-45, 45)
 
-            random_yaw = random.uniform(0, 360)
-            random_pitch = random.uniform(-45, 45)
-            await client.look(yaw=random_yaw, pitch=random_pitch)
-            await asyncio.sleep(0.5)
+            print(f"🚶 Moving randomly (yaw={yaw:.1f}, pitch={pitch:.1f})")
+            await bot.move(x=x, z=z, yaw=yaw, pitch=pitch)
+            await asyncio.sleep(1)
 
-            print(f"🚶 Moving to ({target_x:.1f}, {target_y:.1f}, {target_z:.1f})")
-            await client.move(x=target_x, y=target_y, z=target_z, yaw=random_yaw, pitch=random_pitch)
-
+            # Swing arm to simulate touching blocks
             if random.random() < 0.5:
-                await client.swing_arm()
+                print("👋 Swinging arm")
+                await bot.swing_arm()
             else:
-                await client.use_item(hand=0)
+                print("🖱️ Using held item")
+                await bot.use_item()
 
+            # Occasionally look around
             if random.random() < 0.3:
-                await client.look(yaw=random.uniform(0, 360), pitch=random.uniform(-90, 90))
+                await bot.look(yaw=random.uniform(0, 360), pitch=random.uniform(-90, 90))
+                print("👀 Looking around")
 
-            await asyncio.sleep(random.uniform(2, 8))
+            await asyncio.sleep(random.uniform(2, 6))
         except Exception as e:
             print(f"⚠️ Wander loop error: {e}")
             await asyncio.sleep(5)
 
 async def send_to_minecraft(text):
-    global bot_client
-    if bot_client is None:
+    global bot_instance
+    if bot_instance is None:
         print("[BOT] Not connected yet, cannot send message.")
         return
     try:
-        await bot_client.send_chat(text)
+        await bot_instance.chat(text)
         print(f"[SENT] {text}")
     except Exception as e:
         print(f"[BOT] Failed to send: {e}")
-
-async def bot_main_with_global():
-    global bot_client
-    client = MinecraftClient(
-        host=SERVER_HOST,
-        port=SERVER_PORT,
-        username=BOT_USERNAME,
-        reconnect_policy=ExponentialBackoff(base_delay=5.0, max_delay=120.0, max_attempts=0),
-    )
-    bot_client = client
-
-    @client.event
-    async def on_connect(c):
-        print(f"✅ Connected to {SERVER_HOST}:{SERVER_PORT}")
-        socketio.emit("bot_status", {"status": "connected"})
-
-    @client.event
-    async def on_spawn(x, y, z):
-        print(f"📍 Spawned at {x}, {y}, {z}")
-        asyncio.create_task(wander_loop(client))
-
-    @client.event
-    async def on_chat(message, sender_uuid):
-        if sender_uuid == client.uuid:
-            return
-        sender_name = str(sender_uuid)
-        print(f"[CHAT] {sender_name}: {message}")
-        save_message(sender_name, message)
-        socketio.emit("new_message", {
-            "timestamp": datetime.utcnow().isoformat(),
-            "sender": sender_name,
-            "message": message
-        })
-
-    @client.event
-    async def on_disconnect(reason):
-        print(f"❌ Disconnected: {reason}")
-        socketio.emit("bot_status", {"status": "disconnected"})
-
-    @client.event
-    async def on_error(exc):
-        print(f"⚠️ Error: {exc}")
-        socketio.emit("bot_status", {"status": f"error: {exc}"})
-
-    await client.start()
 
 def run_bot_thread():
     global bot_loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     bot_loop = loop
-    loop.run_until_complete(bot_main_with_global())
+    loop.run_until_complete(bot_main())
 
 def process_web_queue():
     while True:
