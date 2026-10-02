@@ -13,8 +13,8 @@ from mcpycore import MinecraftClient
 from mcpycore.client.reconnect import ExponentialBackoff
 
 # ---------- Configuration ----------
-SERVER_HOST = os.getenv("MC_HOST", "play.example.com")
-SERVER_PORT = int(os.getenv("MC_PORT", 25565))
+SERVER_HOST = os.getenv("MC_HOST", "nd-de2.hn21.xyz")
+SERVER_PORT = int(os.getenv("MC_PORT", 20029))
 BOT_USERNAME = os.getenv("MC_USERNAME", "WanderBot")
 WEB_PORT = int(os.getenv("PORT", 8080))  # Koyeb sets PORT automatically
 
