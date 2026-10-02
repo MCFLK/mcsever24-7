@@ -1,0 +1,7 @@
+{
+  "name": "homie-bot",
+  "version": "1.0.0",
+  "dependencies": {
+    "mineflayer": "^4.23.0"
+  }
+}
