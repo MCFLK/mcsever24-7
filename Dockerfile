@@ -1,6 +1,16 @@
-FROM node:20-alpine
+FROM python:3.12-slim
+
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-CMD ["npm", "start"]
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the single Python file
+COPY bot.py .
+
+# Expose the web port
+EXPOSE 8080
+
+# Run the application
+CMD ["python", "bot.py"]
